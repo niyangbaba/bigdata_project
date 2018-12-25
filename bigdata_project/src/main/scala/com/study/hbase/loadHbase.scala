@@ -17,7 +17,7 @@ object loadHbase {
     val confi = new Configuration()
     confi.addResource("hbase-site.xml")
 
-
+    //读取 hdfs 上的文件 处理 然后 存入 到 hbase中
 
 
 
