@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script src="http://h21/tracker.js"></script>
+    <script>
+/*
+        //写cookie
+        //        document.cookie = "UUID = 19981114";
+        //        document.cookie = "a = 11";
+        //        document.cookie = "b = 14";
+        //读cookie document.cookie   UUID=19981114;a=11;b=14
+        //        alert(document.cookie)
+
+        //创建一个对象
+        var person = {
+            id: 1,
+            name: "李四",
+            age: 18,
+            gender: true,
+            habbit: ["LOL", "DNF","DOTA"] ,
+            eat: function (foodName) {
+                alert("吃" + foodName)
+            }
+        };
+//        alert(person.gender);
+//        alert(person["id"])
+        //动态添加属性给person
+        person.class = "1712";
+        person["SchoolNumber"] = 1504130;
+//        alert(person.class)
+//        alert(person.SchoolNumber)
+
+        for(key in person){
+            alert(person[key])
+        }
+        //创建图片，模拟发送数据到日志服务器上
+        var image = new Image(1,1);
+        image.src = "http://h21/log.gif?UUID=a&uid=b"
+*/
+     // window.onload  先加载标签 再加载js
+        function getKeyWord() {
+            var keyWord = document.getElementById("kw").value;
+           window.__AE__.searchEvent(keyWord);
+        }
+        function addCart() {
+            var gid = document.getElementById("img_1").getAttribute("data-gid");
+            window.__AE__.addCartEvent(gid);
+        }
+    </script>
+
+</head>
+<body>
+
+<input type="text" id="kw" style="width: 500px;" value=""><input type="button" value="搜索" onclick="getKeyWord()">
+<img src="1.jpg" id="img_1" style="width: 50px;height: 30px;" data-gid="1"><input type="button" value="加入购物车" onclick="addCart()">
+
+</body>
+</html>
