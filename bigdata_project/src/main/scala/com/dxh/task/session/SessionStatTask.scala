@@ -2,7 +2,7 @@ package com.dxh.task.session
 
 
 import com.alibaba.fastjson.JSON
-import com.dxh.bean.SparkTask
+import com.dxh.bean.{SessionAggrStat, SparkTask}
 import com.dxh.constants.{GlobalConstants, LogConstants}
 import com.dxh.dao.SparkTaskDao
 import com.dxh.enum.EventEnum
@@ -15,6 +15,7 @@ import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.util.{Base64, Bytes}
 import org.apache.hadoop.mapred.JobConf
+import org.apache.spark.Accumulable
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable.ArrayBuffer
@@ -127,6 +128,94 @@ object SessionStatTask extends BaseTask {
   }
 
   /**
+    * 计算访问时长所属区间
+    *
+    * @param visitTimeLength
+    * @param sessionAccumulator
+    */
+  private def calculateVisitTimeRange(visitTimeLength: Int, sessionAccumulator: Accumulable[String, String]): Unit = {
+
+    if (visitTimeLength >= 0 && visitTimeLength <= 3) {
+      sessionAccumulator.add(GlobalConstants.TIME_1s_3s)
+    } else if (visitTimeLength >= 4 && visitTimeLength <= 6) {
+      sessionAccumulator.add(GlobalConstants.TIME_4s_6s)
+    } else if (visitTimeLength >= 7 && visitTimeLength <= 9) {
+      sessionAccumulator.add(GlobalConstants.TIME_7s_9s)
+    } else if (visitTimeLength >= 10 && visitTimeLength <= 30) {
+      sessionAccumulator.add(GlobalConstants.TIME_10s_30s)
+    } else if (visitTimeLength > 30 && visitTimeLength <= 60) {
+      sessionAccumulator.add(GlobalConstants.TIME_30s_60s)
+    } else if (visitTimeLength > 1 * 60 && visitTimeLength <= 3 * 60) {
+      sessionAccumulator.add(GlobalConstants.TIME_1m_3m)
+    } else if (visitTimeLength > 3 * 60 && visitTimeLength <= 10 * 60) {
+      sessionAccumulator.add(GlobalConstants.TIME_3m_10m)
+    } else if (visitTimeLength > 10 * 60 && visitTimeLength <= 30 * 60) {
+      sessionAccumulator.add(GlobalConstants.TIME_10m_30m)
+    } else if (visitTimeLength > 30 * 60) {
+      sessionAccumulator.add(GlobalConstants.TIME_30m)
+    }
+
+  }
+
+  /**
+    * 计算访问步长所属区间
+    *
+    * @param visitStepLength
+    * @param sessionAccumulator
+    */
+  private def calculateVisitStepRange(visitStepLength: Int, sessionAccumulator: Accumulable[String, String]): Unit = {
+    if (visitStepLength >= 1 && visitStepLength <= 3) {
+      sessionAccumulator.add(GlobalConstants.STEP_1_3)
+    } else if (visitStepLength >= 4 && visitStepLength <= 6) {
+      sessionAccumulator.add(GlobalConstants.STEP_4_6)
+    } else if (visitStepLength >= 7 && visitStepLength <= 9) {
+      sessionAccumulator.add(GlobalConstants.STEP_7_9)
+    } else if (visitStepLength >= 10 && visitStepLength <= 30) {
+      sessionAccumulator.add(GlobalConstants.STEP_10_30)
+    } else if (visitStepLength > 30 && visitStepLength <= 60) {
+      sessionAccumulator.add(GlobalConstants.STEP_30_60)
+    } else if (visitStepLength > 60) {
+      sessionAccumulator.add(GlobalConstants.STEP_60)
+    }
+
+  }
+
+  /**
+    *
+    * @param value
+    */
+  private def saveSessionVistTimeAndVistStepResultToMySQL(value: String) = {
+    //先删除 taskid对应 的mysql上的数据
+    SparkTaskDao.deleteByTaskId(taskID)
+    //获取sessionCount
+    val session_count = Utils.getFieldValue(value, GlobalConstants.SESSION_COUNT).toInt
+    //将累加器的值 存入到sessionAggrStat对象中
+    val sessionAggrStat: SessionAggrStat = new SessionAggrStat()
+    sessionAggrStat.task_id = taskID
+    sessionAggrStat.session_count = session_count
+    //保留两位 小数 四舍五入    toint 值会为 0
+    sessionAggrStat.time_1s_3s = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_1s_3s).toDouble / session_count, 2)
+    sessionAggrStat.time_4s_6s = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_4s_6s).toDouble / session_count, 2)
+    sessionAggrStat.time_7s_9s = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_7s_9s).toDouble / session_count, 2)
+    sessionAggrStat.time_10s_30s = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_10s_30s).toDouble / session_count, 2)
+    sessionAggrStat.time_30s_60s = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_30s_60s).toDouble / session_count, 2)
+    sessionAggrStat.time_1m_3m = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_1m_3m).toDouble / session_count, 2)
+    sessionAggrStat.time_3m_10m = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_3m_10m).toDouble / session_count, 2)
+    sessionAggrStat.time_10m_30m = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_10m_30m).toDouble / session_count, 2)
+    sessionAggrStat.time_30m = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.TIME_30m).toDouble / session_count, 2)
+    sessionAggrStat.step_1_3 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_1_3).toDouble / session_count, 2)
+    sessionAggrStat.step_4_6 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_4_6).toDouble / session_count, 2)
+    sessionAggrStat.step_7_9 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_7_9).toDouble / session_count, 2)
+    sessionAggrStat.step_10_30 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_10_30).toDouble / session_count, 2)
+    sessionAggrStat.step_30_60 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_30_60).toDouble / session_count, 2)
+    sessionAggrStat.step_60 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_60).toDouble / session_count, 2)
+
+    //存入mysql
+    SparkTaskDao.insert(sessionAggrStat)
+
+  }
+
+  /**
     *
     * @param tuple11RDD
     * *(uuid, sid, eventName, accessTime, osName, browserName, keyword, gid, country, province, city)
@@ -145,7 +234,7 @@ object SessionStatTask extends BaseTask {
   private def sessionVisitTimeAndStepLengthStat(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
 
     //根据sid进行分组
-    tuple11RDD.groupBy(_._2).map(tuple2 => {
+    val sessionBehaviorStrRDD = tuple11RDD.groupBy(_._2).map(tuple2 => {
       //tuple2  sid ,list(......)
 
       var country, province, city: String = null
@@ -193,7 +282,7 @@ object SessionStatTask extends BaseTask {
         GlobalConstants.FIELD_VISIT_STEP_LENGTH + "=" + visitStepLength
 
       if (keywordBuffer.length > 0)
-        temp += "|" +  GlobalConstants.FIELD_KEYWORDS + "=" + keywordBuffer.mkString(",")
+        temp += "|" + GlobalConstants.FIELD_KEYWORDS + "=" + keywordBuffer.mkString(",")
 
       if (goodsBuffer.length > 0)
         temp += "|" + GlobalConstants.FIELD_GOODS_IDS + "=" + goodsBuffer.mkString(",")
@@ -201,6 +290,90 @@ object SessionStatTask extends BaseTask {
       //返回temp
       temp
     })
+
+    //自定义的一个累加器
+    val sessionAccumulator = sc.accumulable("")(SessionAccumulator)
+
+    //访问时长累加器
+    val visitTimeLengthTotalAccumulator = sc.longAccumulator("visitTimeLengthTotalAccumulator")
+    //访问步长累计器
+    val visitStepLengthTotalAccumulator = sc.longAccumulator("visitStepLengthTotalAccumulator")
+
+    sessionBehaviorStrRDD.foreach(line => {
+      //session_count 字段进行累加
+      sessionAccumulator.add(GlobalConstants.SESSION_COUNT)
+      //取出访问时长
+      val visitTimeLength = Utils.getFieldValue(line, GlobalConstants.FIELD_VISIT_TIME_LENGTH).toInt
+      visitTimeLengthTotalAccumulator.add(visitTimeLength)
+      //计算访问时长所属区间
+      calculateVisitTimeRange(visitTimeLength, sessionAccumulator)
+
+      //取出访问步长
+      val visitStepLength = Utils.getFieldValue(line, GlobalConstants.FIELD_VISIT_STEP_LENGTH).toInt
+      visitStepLengthTotalAccumulator.add(visitStepLength)
+      //计算访问步长所属区间
+      calculateVisitStepRange(visitStepLength, sessionAccumulator)
+
+    })
+
+    //将session访问时长和步长占比保持到mysql
+    saveSessionVistTimeAndVistStepResultToMySQL(sessionAccumulator.value)
+
+    val avgVisitTimeLength = Utils.getScale(visitTimeLengthTotalAccumulator.value.toDouble / Utils.getFieldValue(sessionAccumulator.value, GlobalConstants.SESSION_COUNT).toInt, 2)
+    val avgVisitStepLength = Utils.getScale(visitStepLengthTotalAccumulator.value.toDouble / Utils.getFieldValue(sessionAccumulator.value, GlobalConstants.SESSION_COUNT).toInt, 2)
+
+    println(s"web端平均访问时长：${avgVisitTimeLength}")
+    println(s"web端平均访问深度：${avgVisitStepLength}")
+
+
+  }
+
+  /**
+    * 统计每天的新增用户数
+    *
+    * @param tuple11RDD
+    * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
+    */
+  private def calculateNewUser(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+
+    tuple11RDD.filter(_._3.equals(EventEnum.launchEvent.toString))
+      .map(line => {
+        (Utils.formatDate(line._4.toLong, "yyyy-MM-dd"), 1)
+      }).reduceByKey(_ + _)
+      .foreach(println(_))
+
+  }
+
+  /**
+    * 统计每个地区(省份)的uv(独立访客)
+    *
+    * @param tuple11RDD
+    * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
+    */
+  def calculateProvinceUV(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+    tuple11RDD.map(x => (x._10, x._1)).distinct().map(x => (x._1, 1)).reduceByKey(_ + _).foreach(println(_))
+  }
+
+  /**
+    * 统计每天每款浏览器的uv(独立访客)
+    *
+    * @param tuple11RDD
+    * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
+    */
+  def calculateBrowserUv(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+
+    tuple11RDD.map(x => ((Utils.formatDate(x._4.toLong, "yyyy-MM-dd"), x._5), x._1)).distinct().map(x => (x._1, 1)).reduceByKey(_ + _).foreach(println(_))
+
+  }
+
+  /**
+    * 在符合条件的session中，获取点击、加入购物车，下单，支付数量排名前5的品类
+    *
+    * @param tuple11RDD
+    *
+    *
+    */
+  def calculateCategoryTop5(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
 
 
   }
@@ -214,7 +387,22 @@ object SessionStatTask extends BaseTask {
     //3,从hbase中读取符合任务参数的session访问记录
     val tuple11RDD = loadDataFromHbase()
     //4,调用spark各类算子，进行session的访问时长和补偿的分析性统计，最终将结果保存到mysql中
-    sessionVisitTimeAndStepLengthStat(tuple11RDD)
+    //    sessionVisitTimeAndStepLengthStat(tuple11RDD)
+
+
+    //统计每天的新增用户数
+    //    calculateNewUser(tuple11RDD)
+
+    //统计每个地区(省份)的uv(独立访客)
+    //    calculateProvinceUV(tuple11RDD)
+
+    //统计每天每款浏览器的uv(独立访客)
+    //    calculateBrowserUv(tuple11RDD)
+
+
+    //在符合条件的session中，获取点击、加入购物车，下单，支付数量排名前5的品类
+    calculateCategoryTop5(tuple11RDD)
+
     sc.stop()
   }
 

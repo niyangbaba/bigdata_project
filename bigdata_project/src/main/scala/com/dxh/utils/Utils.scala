@@ -3,6 +3,10 @@ package com.dxh.utils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.regex.Pattern
+import java.math.{BigDecimal, RoundingMode}
+
+import scala.util.control.Breaks._
+
 
 /**
   * Created by Administrator on 2018/12/21.
@@ -56,7 +60,7 @@ object Utils {
     * @param longTime 1545580800000
     * @param pattern  yyyy/MM/dd
     */
-  def formatDate(longTime:Long,pattern:String) ={
+  def formatDate(longTime: Long, pattern: String) = {
     val simpleDateFormat = new SimpleDateFormat(pattern)
 
     simpleDateFormat.format(new Date(longTime))
@@ -65,14 +69,100 @@ object Utils {
 
   /**
     * 判断输入的参数是否属数字
+    *
     * @param num
     * @return
     */
-  def isNum(num : String) ={
+  def isNum(num: String) = {
     val reg = "\\d+"
     Pattern.compile(reg).matcher(num).matches()
   }
 
+  /**
+    * 获取值
+    * nadou!!!!!!!
+    *
+    * session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0
+    *
+    * session_count 1s_3s .
+    **/
+  /**
+    * def getFieldValue(line: String, fieldName: String) = {
+    * *
+    * var fileNameValue: String = null
+    * *
+    * val startIndex = line.indexOf(fieldName)
+    * *
+    * var endIndex = line.indexOf("|", startIndex)
+    * *
+    * if (endIndex == -1) endIndex = line.length
+    * *
+    * fileNameValue = line.substring(startIndex + fieldName.length +1 , endIndex)
+    * *
+    * fileNameValue
+    * }
+    */
+
+  /**
+    * 获取字符串中每个字段的值
+    *
+    * @param line
+    * session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0|3m_10m=0|10m_30m=0|30m=0|1_3=1|4_6=0|7_9=0|10_30=0|30_60=0|60=0
+    * @param fieldName
+    * session_count
+    */
+  def getFieldValue(line: String, fieldName: String) = {
+
+    var fieldValue: String = null
+
+    val items = line.split("[|]")
+
+    breakable({
+      for (i <- 0 until (items.length)) {
+        val kv = items(i).split("[=]")
+        if (kv(0).equals(fieldName)) {
+          fieldValue = kv(1)
+          break()
+        }
+      }
+    })
+    fieldValue
+  }
+
+
+  /**
+    * 赋值
+    *
+    * @param line
+    * session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0
+    * @param fieldName
+    * session_count 1s_3s .
+    * @param fieldNameNewValue
+    * session_count=5|1s_3s=2|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0
+    */
+  def setFieldValue(line: String, fieldName: String, fieldNameNewValue: String) = {
+
+    val items = line.split("[|]")
+    for (i <- 0 until (items.length)) {
+      val kv = items(i).split("[=]")
+      if (kv(0).equals(fieldName)) {
+        kv(1) = fieldNameNewValue
+      }
+      items(i) = kv(0) + "=" + kv(1)
+    }
+    items.mkString("|")
+  }
+
+  /**
+    * 将传入的double 四舍五入
+    *
+    * @param doubleValue 传入的值
+    * @param scale       保留几位小数
+    */
+  def getScale(doubleValue: Double, scale: Int) = {
+    val bigDecimal = new BigDecimal(doubleValue) //需要手动导入  import java.math.BigDecimal
+    bigDecimal.setScale(scale, RoundingMode.HALF_UP).doubleValue()
+  }
 
 }
 
