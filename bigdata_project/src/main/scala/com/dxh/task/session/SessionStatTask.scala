@@ -1,11 +1,14 @@
 package com.dxh.task.session
 
 
+import java.sql.ResultSet
+
 import com.alibaba.fastjson.JSON
-import com.dxh.bean.{SessionAggrStat, SparkTask}
+import com.dxh.bean.{SessionAggrStat, SparkTask, Top5Category}
 import com.dxh.constants.{GlobalConstants, LogConstants}
 import com.dxh.dao.SparkTaskDao
 import com.dxh.enum.EventEnum
+import com.dxh.jdbc.JDBCHelper
 import com.dxh.task.BaseTask
 import com.dxh.utils.Utils
 import org.apache.commons.lang.StringUtils
@@ -16,7 +19,7 @@ import org.apache.hadoop.hbase.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.util.{Base64, Bytes}
 import org.apache.hadoop.mapred.JobConf
 import org.apache.spark.Accumulable
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{JdbcRDD, RDD}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -370,11 +373,82 @@ object SessionStatTask extends BaseTask {
     * 在符合条件的session中，获取点击、加入购物车，下单，支付数量排名前5的品类
     *
     * @param tuple11RDD
-    *
+    * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
     *
     */
   def calculateCategoryTop5(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+    //(gid,eventName)
+    val gidEventNameRDD = tuple11RDD.filter(x => StringUtils.isNotBlank(x._8)).map(x => (x._8, x._3))
+    //从mysql数据库中读取商品与品类数据
+    //(gid,cat_id)
+    val gidCatIdRDD = new JdbcRDD[(String, String)](
+      sc,
+      () => JDBCHelper.getConnection(),
+      "select goods_id,cat_id from ecs_goods where goods_id>? and goods_id<?",
+      0,
+      Int.MaxValue,
+      1,
+      (resultSet: ResultSet) => {
+        (resultSet.getString("goods_id"), resultSet.getString("cat_id"))
+      }
+    )
 
+    // (gid,(eventName,cat_id))
+    val joinRDD = gidEventNameRDD.join(gidCatIdRDD)
+    //需要将商品发生的事件，转换成品类发生的事件(gid,eventName)==>(cat_id,eventName)
+    val catIdEventNameRDD = joinRDD.map(x => (x._2._2, x._2._1))
+
+    //发生过事件的品类(cat_id,cat_id)
+    val categoryRDD = catIdEventNameRDD.map(x => (x._1, x._1)).distinct()
+    //每个品类被点击次数的rdd (cat_id,click_count)
+    val clickCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.pageViewEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    //每个品类被加入购物车次数的rdd  (cat_id,cart_count)
+    val cartCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.addCartEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    //每个品类被下单次数的rdd (cat_id,order_count)
+    val orderCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.orderEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    //每个品类被支付次数的rdd (cat_id,pay_count)
+    val payCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.payEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+
+    val categoryBehaviorRDD = categoryRDD.leftOuterJoin(clickCountRDD) //(cat_id,(cat_id,click_count))
+      .map(x => {
+      var click_count = 0
+      if (!x._2._2.isEmpty) {
+        click_count = x._2._2.get
+      }
+      (x._1, GlobalConstants.CLICK_COUNT + "=" + click_count)
+    }).leftOuterJoin(cartCountRDD) //(cat_id,(click=xx,cart_count))
+      .map(x => {
+      var cart_count = 0
+      if (!x._2._2.isEmpty) {
+        cart_count = x._2._2.get
+      }
+      (x._1, x._2._1 + "|" + GlobalConstants.CART_COUNT + "=" + cart_count)
+    }).leftOuterJoin(orderCountRDD) //(cat_id,(click=xx|cart_count=xx,order_count))
+      .map(x => {
+      var order_count = 0
+      if (!x._2._2.isEmpty) {
+        order_count = x._2._2.get
+      }
+      (x._1, x._2._1 + "|" + GlobalConstants.ORDER_COUNT + "=" + order_count)
+    }).leftOuterJoin(payCountRDD) //(cat_id,(click=xx|cart_count=xx|order_count=xx,pay_count))
+      .map(x => {
+      var pay_count = 0
+      if (!x._2._2.isEmpty) {
+        pay_count = x._2._2.get
+      }
+      (x._1, x._2._1 + "|" + GlobalConstants.PAY_COUNT + "=" + pay_count)
+    }) //(cat_id,(click=xx|cart_count=xx|order_count=xx|pay_count=xx))
+
+    categoryBehaviorRDD.map(x => {
+      new Top5Category(
+        taskID,
+        x._1.toInt,
+        Utils.getFieldValue(x._2,GlobalConstants.CLICK_COUNT).toInt,
+        Utils.getFieldValue(x._2,GlobalConstants.CART_COUNT).toInt,
+        Utils.getFieldValue(x._2,GlobalConstants.ORDER_COUNT).toInt,
+        Utils.getFieldValue(x._2,GlobalConstants.PAY_COUNT).toInt
+      )
+    }).sortBy(x => x,false,1).foreach(x => println(x.toString))
 
   }
 
@@ -387,7 +461,7 @@ object SessionStatTask extends BaseTask {
     //3,从hbase中读取符合任务参数的session访问记录
     val tuple11RDD = loadDataFromHbase()
     //4,调用spark各类算子，进行session的访问时长和补偿的分析性统计，最终将结果保存到mysql中
-    //    sessionVisitTimeAndStepLengthStat(tuple11RDD)
+    //        sessionVisitTimeAndStepLengthStat(tuple11RDD)
 
 
     //统计每天的新增用户数
@@ -402,6 +476,7 @@ object SessionStatTask extends BaseTask {
 
     //在符合条件的session中，获取点击、加入购物车，下单，支付数量排名前5的品类
     calculateCategoryTop5(tuple11RDD)
+
 
     sc.stop()
   }

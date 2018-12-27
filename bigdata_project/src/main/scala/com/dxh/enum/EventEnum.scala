@@ -12,4 +12,8 @@ object EventEnum extends Enumeration {
   val searchEvent = Value(2, "e_s")
   //加入购物车事件
   val addCartEvent = Value(3, "e_ad")
+  //下单事件
+  val orderEvent = Value(4, "e_ord")
+  //支付事件
+  val payEvent = Value(5, "e_pay")
 }

@@ -46,4 +46,18 @@ object GlobalConstants {
   val STEP_30_60 = "30_60"
   val STEP_60 = "60"
 
+  val CLICK_COUNT = "click_count"
+  val CART_COUNT = "cart_count"
+  val ORDER_COUNT = "order_count"
+  val PAY_COUNT = "pay_count"
+
+
+  val METADATA_BROKER__LIST = "metadata.broker.list"
+  val GROUP_ID = "group.id"
+  val AUTO_OFFSET_RESET = "auto.offset.reset"
+  val CHECKPOINT_PATH = "checkpoint.path"
+  val BATCH_INTERVAL = "batch.interval"
+  val TOPICS = "topics"
+
+
 }
