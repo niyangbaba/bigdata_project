@@ -11,6 +11,7 @@ import org.apache.hadoop.hbase.client.Put
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapred.TableOutputFormat
 import org.apache.hadoop.mapred.JobConf
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
@@ -22,8 +23,8 @@ import scala.collection.mutable
 object AnalsysisLogTask extends BaseTask {
 
   //变量存放日期
-  var inputData: String = null
-  var inputPath: String = null
+  var inputData: String = _
+  var inputPath: String = _
 
   //输入记录累加器
   val inputRecordAccumulator = sc.longAccumulator("inputRecordAccumulator")
@@ -33,16 +34,20 @@ object AnalsysisLogTask extends BaseTask {
 
   def main(args: Array[String]): Unit = {
 
-    //1.验证参数是否正确
+    //添加项目使用jar包
+    sc.addJar("F:\\SpaceWork\\LearnProject\\bigdata_project\\target\\bigdata_project-1.0-SNAPSHOT.jar")
+    //1.验证参数是否正确7
     validateInputArgs(args)
     //2.验证当前日期是否存在对应的日志(验证路径是否存在)  HDFS的路径是否存在
     validateInputPathExist()
     //3.使用spark加载ip规则库
     val ipRules = loadIPRules()
-    //4.使用spark去hdfs上读取需要解析的日志
-    val eventLogMapRDD = loadLog(ipRules)
-    //eventLogMapRDD.foreach(println(_))
 
+    //使用广播变量
+    val ipRulesBroadcast: Broadcast[Array[IPRule]] = sc.broadcast(ipRules)
+    //4.使用spark去hdfs上读取需要解析的日志
+    val eventLogMapRDD: RDD[mutable.Map[String, String]] = loadLog(ipRulesBroadcast)
+    // eventLogMapRDD.foreach(println(_))
     //5,将解析好的日志保存到hbase中
     saveLogToHbase(eventLogMapRDD)
 
@@ -70,36 +75,39 @@ object AnalsysisLogTask extends BaseTask {
       val rowKey = accessTime + "_" + Math.abs((uuid + eventName).hashCode)
       //创建一个put对象
       val put = new Put(rowKey.getBytes())
-      //循环遍历每一个map  获取map的kv
+      //循环遍历每一个map  获取map的kv  对put赋值  列族 列 值
       map.foreach(tuple2 => {
         put.addColumn(LogConstants.HBASE_LOG_TABLE_FAMILY.getBytes(), tuple2._1.getBytes(), tuple2._2.getBytes())
       })
 
-      //返回
+      //返回  TableOutputFormat extends FileOutputFormat<ImmutableBytesWritable, Put>
       (new ImmutableBytesWritable(), put)
     })
 
     val jobConf = new JobConf(configuration)
 
-    //指定需要采用哪个类将结果写入到hbase中
+    //指定需要采用哪个类将结果写入到hbase中  org.apache.hadoop.hbase.mapred.TableOutputFormat
     jobConf.setOutputFormat(classOf[TableOutputFormat])
 
-    //指定写入的目标表 create 'event_log','log'
+    //指定写入的目标表 在hbase上创建表 create 'event_log','log'
     jobConf.set(TableOutputFormat.OUTPUT_TABLE, LogConstants.HBASE_LOG_TABLE)
 
+    //将结果保存至HBase
     tuple2Rdd.saveAsHadoopDataset(jobConf)
   }
 
   /**
     * 使用spark去hdfs上读取需要解析的日志 解析
     *
-    * @param ipRules
+    * @param ipRulesBroadcast
     */
-  private def loadLog(ipRules: Array[IPRule]) = {
+  private def loadLog(ipRulesBroadcast: Broadcast[Array[IPRule]]) = {
 
-    val  eventMapRdd : RDD[mutable.Map[String, String]] = sc.textFile(inputPath).map(logText => {
+    val eventMapRdd: RDD[mutable.Map[String, String]] = sc.textFile(inputPath).map(logText => {
+      //累加器 加一
       inputRecordAccumulator.add(1)
-      AnalysisLog.analysisLog(logText, ipRules)
+      //对日志 进行  分析 返回一个可变的 map集合  需要传入 日志和 ip规则Array[IPRule]
+      AnalysisLog.analysisLog(logText, ipRulesBroadcast.value)
     })
       .filter(map => {
         if (map == null) {
@@ -170,13 +178,17 @@ object AnalsysisLogTask extends BaseTask {
     */
   private def validateInputPathExist(): Unit = {
 
+    // HDFS 上的文件储存路径  将传过来的时间进行转换
     inputPath = "/logs/" + Utils.formatDate(Utils.parseDate(inputData, "yyyy-MM-dd"), "yyyy/MM/dd")
 
+    //使用FileSystem 其操作关于hdfs文件系统
     var fileSystem: FileSystem = null
 
+    //fileSystem 是流 需要try catch 关闭
     try {
       fileSystem = FileSystem.newInstance(configuration)
 
+      //判断hdfs上是否存在 该路径
       if (!fileSystem.exists(new Path(inputPath))) {
 
         println(
@@ -193,6 +205,7 @@ object AnalsysisLogTask extends BaseTask {
       case e: Exception => e.printStackTrace()
     } finally {
 
+      //最终将 fileSystem关闭
       if (fileSystem != null)
         fileSystem.close()
 

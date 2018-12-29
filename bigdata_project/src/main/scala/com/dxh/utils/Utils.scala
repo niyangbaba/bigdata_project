@@ -23,7 +23,7 @@ object Utils {
 
     var numIp = 0L
 
-    for (i <- 0 until (ips.length)) //包左不包右
+    for (i <- 0 until ips.length) //包左不包右
     //numIp左移8位 和 ip进行 或运算
       numIp = (numIp << 8) | ips(i).toLong
 

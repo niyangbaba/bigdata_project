@@ -19,7 +19,7 @@ object AnalysisIP {
   def analysisIp(ip:String,iPRules : Array[IPRule]) = {
     val regionInfo = RegionInfo()
 
-    //将ip解析成数字Long
+    //将ip解析成数字Long  192.168.233.21 -》198456456485
     val numIp = Utils.ip2Long(ip)
     //通过二分查找法，查找出ip对应的地域信息
     val index: Int = binnarySearch(numIp,iPRules)

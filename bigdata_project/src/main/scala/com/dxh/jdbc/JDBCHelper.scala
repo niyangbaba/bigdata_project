@@ -48,7 +48,7 @@ object JDBCHelper {
       //获取执行sql的命令对象
       preparedStatement = connection.prepareStatement(sql)
       //对sql语句中的 ？进行赋值
-      for (i <- 0 until (sqlParams.length)) {
+      for (i <- sqlParams.indices) {
         preparedStatement.setObject(i + 1, sqlParams(i))
       }
       //执行sql语句
@@ -81,9 +81,9 @@ object JDBCHelper {
       //获取执行sql的命令对象
       preparedStatement = connection.prepareStatement(sql)
 
-      for (i <- 0 until (sqlParamsArray.length)) {
+      for (i <- sqlParamsArray.indices) {
         val sqlParams = sqlParamsArray(i)
-        for (j <- 0 until (sqlParams.length)) {
+        for (j <- sqlParams.indices) {
           //设置参数
           preparedStatement.setObject(j + 1, sqlParams(j))
         }
@@ -125,7 +125,7 @@ object JDBCHelper {
       connection = getConnection()
       preparedStatement = connection.prepareStatement(sql)
 
-      for(i <- 0 until(sqlParams.length)){
+      for(i <- sqlParams.indices){
         preparedStatement.setObject(i+1,sqlParams(i))
       }
 

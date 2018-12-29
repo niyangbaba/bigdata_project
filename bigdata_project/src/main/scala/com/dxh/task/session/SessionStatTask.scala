@@ -4,9 +4,9 @@ package com.dxh.task.session
 import java.sql.ResultSet
 
 import com.alibaba.fastjson.JSON
-import com.dxh.bean.{SessionAggrStat, SparkTask, Top5Category}
+import com.dxh.bean.{AreaTop3Product, SessionAggrStat, SparkTask, Top5Category}
 import com.dxh.constants.{GlobalConstants, LogConstants}
-import com.dxh.dao.SparkTaskDao
+import com.dxh.dao.{AreaTop3ProductDao, SessionAggrStatDao, SparkTaskDao, Top5CategoryDao}
 import com.dxh.enum.EventEnum
 import com.dxh.jdbc.JDBCHelper
 import com.dxh.task.BaseTask
@@ -20,6 +20,8 @@ import org.apache.hadoop.hbase.util.{Base64, Bytes}
 import org.apache.hadoop.mapred.JobConf
 import org.apache.spark.Accumulable
 import org.apache.spark.rdd.{JdbcRDD, RDD}
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -29,7 +31,7 @@ import scala.collection.mutable.ArrayBuffer
 object SessionStatTask extends BaseTask {
 
   var taskID: Int = 0
-  var sparkTask: SparkTask = null
+  var sparkTask: SparkTask = _
 
   /**
     * 验证输入参数是否正确
@@ -92,7 +94,7 @@ object SessionStatTask extends BaseTask {
 
     //构建Scan 扫描仪
     val scan = new Scan()
-    //设置扫描器的开始和结束位置(包前不包后)
+    //设置扫描器的开始和结束位置 (包前不包后) **不清楚
     scan.setStartRow(startTime.toString.getBytes())
     scan.setStopRow(endTime.toString.getBytes())
 
@@ -189,7 +191,7 @@ object SessionStatTask extends BaseTask {
     */
   private def saveSessionVistTimeAndVistStepResultToMySQL(value: String) = {
     //先删除 taskid对应 的mysql上的数据
-    SparkTaskDao.deleteByTaskId(taskID)
+    SessionAggrStatDao.deleteByTaskId(taskID)
     //获取sessionCount
     val session_count = Utils.getFieldValue(value, GlobalConstants.SESSION_COUNT).toInt
     //将累加器的值 存入到sessionAggrStat对象中
@@ -214,7 +216,7 @@ object SessionStatTask extends BaseTask {
     sessionAggrStat.step_60 = Utils.getScale(Utils.getFieldValue(value, GlobalConstants.STEP_60).toDouble / session_count, 2)
 
     //存入mysql
-    SparkTaskDao.insert(sessionAggrStat)
+    SessionAggrStatDao.insert(sessionAggrStat)
 
   }
 
@@ -284,10 +286,10 @@ object SessionStatTask extends BaseTask {
         GlobalConstants.FIELD_VISIT_TIME_LENGTH + "=" + visitTimeLength + "|" +
         GlobalConstants.FIELD_VISIT_STEP_LENGTH + "=" + visitStepLength
 
-      if (keywordBuffer.length > 0)
+      if (keywordBuffer.nonEmpty)
         temp += "|" + GlobalConstants.FIELD_KEYWORDS + "=" + keywordBuffer.mkString(",")
 
-      if (goodsBuffer.length > 0)
+      if (goodsBuffer.nonEmpty)
         temp += "|" + GlobalConstants.FIELD_GOODS_IDS + "=" + goodsBuffer.mkString(",")
 
       //返回temp
@@ -339,7 +341,7 @@ object SessionStatTask extends BaseTask {
     */
   private def calculateNewUser(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
 
-    tuple11RDD.filter(_._3.equals(EventEnum.launchEvent.toString))
+    tuple11RDD.filter(x => x._3.equals(EventEnum.launchEvent.toString))
       .map(line => {
         (Utils.formatDate(line._4.toLong, "yyyy-MM-dd"), 1)
       }).reduceByKey(_ + _)
@@ -353,7 +355,7 @@ object SessionStatTask extends BaseTask {
     * @param tuple11RDD
     * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
     */
-  def calculateProvinceUV(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+  private def calculateProvinceUV(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
     tuple11RDD.map(x => (x._10, x._1)).distinct().map(x => (x._1, 1)).reduceByKey(_ + _).foreach(println(_))
   }
 
@@ -363,7 +365,7 @@ object SessionStatTask extends BaseTask {
     * @param tuple11RDD
     * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
     */
-  def calculateBrowserUv(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+  private def calculateBrowserUv(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
 
     tuple11RDD.map(x => ((Utils.formatDate(x._4.toLong, "yyyy-MM-dd"), x._5), x._1)).distinct().map(x => (x._1, 1)).reduceByKey(_ + _).foreach(println(_))
 
@@ -376,7 +378,7 @@ object SessionStatTask extends BaseTask {
     * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
     *
     */
-  def calculateCategoryTop5(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+  private def calculateCategoryTop5(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
     //(gid,eventName)
     val gidEventNameRDD = tuple11RDD.filter(x => StringUtils.isNotBlank(x._8)).map(x => (x._8, x._3))
     //从mysql数据库中读取商品与品类数据
@@ -401,54 +403,132 @@ object SessionStatTask extends BaseTask {
     //发生过事件的品类(cat_id,cat_id)
     val categoryRDD = catIdEventNameRDD.map(x => (x._1, x._1)).distinct()
     //每个品类被点击次数的rdd (cat_id,click_count)
-    val clickCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.pageViewEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    val clickCountRDD = catIdEventNameRDD.filter(x => x._2.equals(EventEnum.pageViewEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
     //每个品类被加入购物车次数的rdd  (cat_id,cart_count)
-    val cartCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.addCartEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    val cartCountRDD = catIdEventNameRDD.filter(x => x._2.equals(EventEnum.addCartEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
     //每个品类被下单次数的rdd (cat_id,order_count)
-    val orderCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.orderEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    val orderCountRDD = catIdEventNameRDD.filter(x => x._2.equals(EventEnum.orderEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
     //每个品类被支付次数的rdd (cat_id,pay_count)
-    val payCountRDD = catIdEventNameRDD.filter(_._2.equals(EventEnum.payEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
+    val payCountRDD = catIdEventNameRDD.filter(x => x._2.equals(EventEnum.payEvent.toString)).map(x => (x._1, 1)).reduceByKey(_ + _)
 
     val categoryBehaviorRDD = categoryRDD.leftOuterJoin(clickCountRDD) //(cat_id,(cat_id,click_count))
       .map(x => {
       var click_count = 0
-      if (!x._2._2.isEmpty) {
+      if (x._2._2.nonEmpty) {
         click_count = x._2._2.get
       }
       (x._1, GlobalConstants.CLICK_COUNT + "=" + click_count)
     }).leftOuterJoin(cartCountRDD) //(cat_id,(click=xx,cart_count))
       .map(x => {
       var cart_count = 0
-      if (!x._2._2.isEmpty) {
+      if (x._2._2.nonEmpty) {
         cart_count = x._2._2.get
       }
       (x._1, x._2._1 + "|" + GlobalConstants.CART_COUNT + "=" + cart_count)
     }).leftOuterJoin(orderCountRDD) //(cat_id,(click=xx|cart_count=xx,order_count))
       .map(x => {
       var order_count = 0
-      if (!x._2._2.isEmpty) {
+      if (x._2._2.nonEmpty) {
         order_count = x._2._2.get
       }
       (x._1, x._2._1 + "|" + GlobalConstants.ORDER_COUNT + "=" + order_count)
     }).leftOuterJoin(payCountRDD) //(cat_id,(click=xx|cart_count=xx|order_count=xx,pay_count))
       .map(x => {
       var pay_count = 0
-      if (!x._2._2.isEmpty) {
+      if (x._2._2.nonEmpty) {
         pay_count = x._2._2.get
       }
       (x._1, x._2._1 + "|" + GlobalConstants.PAY_COUNT + "=" + pay_count)
     }) //(cat_id,(click=xx|cart_count=xx|order_count=xx|pay_count=xx))
 
-    categoryBehaviorRDD.map(x => {
+    //对计算的结果 自定义二次排序 取出前5
+    val top5CategoryArray: Array[Top5Category] = categoryBehaviorRDD.map(x => {
       new Top5Category(
         taskID,
         x._1.toInt,
-        Utils.getFieldValue(x._2,GlobalConstants.CLICK_COUNT).toInt,
-        Utils.getFieldValue(x._2,GlobalConstants.CART_COUNT).toInt,
-        Utils.getFieldValue(x._2,GlobalConstants.ORDER_COUNT).toInt,
-        Utils.getFieldValue(x._2,GlobalConstants.PAY_COUNT).toInt
+        Utils.getFieldValue(x._2, GlobalConstants.CLICK_COUNT).toInt,
+        Utils.getFieldValue(x._2, GlobalConstants.CART_COUNT).toInt,
+        Utils.getFieldValue(x._2, GlobalConstants.ORDER_COUNT).toInt,
+        Utils.getFieldValue(x._2, GlobalConstants.PAY_COUNT).toInt
       )
-    }).sortBy(x => x,false,1).foreach(x => println(x.toString))
+    }).sortBy(x => x, false, 1).take(5)
+
+    //将结果存入 mysql中去
+    Top5CategoryDao.deleteByTaskId(taskID)
+    Top5CategoryDao.insert(top5CategoryArray)
+
+  }
+
+  /**
+    * 统计每个省份加入购物车排名前三的商品
+    *
+    * @param tuple11RDD
+    * (uuid, sid, eventName, accessTime, browserName, osName, keyword, gid, country, province, city)
+    */
+  private def addCartTop3GoodsStat(tuple11RDD: RDD[(String, String, String, String, String, String, String, String, String, String, String)]) = {
+
+    /*//隐式转换
+    import  spark.implicits._
+    //先过滤掉 不是加入购物车的事件 同时gid 不能为空
+    val provinceCityGidRDD = tuple11RDD.filter(x => x._3.equals(EventEnum.addCartEvent.toString) && StringUtils.isNotBlank(x._8))
+      //做一次map 得到 (gid,province,city)
+      .map(x => ProvinceCityGid(x._10, x._11, x._8))
+    //第一种   通过反射的方式构建 dataSet
+    provinceCityGidRDD.toDS().show()*/
+
+
+    //第二种 通过元数据的方式 构建 dataSet
+    val rowRdd: RDD[Row] = tuple11RDD.filter(x => x._3.equals(EventEnum.addCartEvent.toString) && StringUtils.isNotBlank(x._8))
+      .map(x => Row(x._10, x._11, x._8))
+
+
+    val schema = StructType(List(
+      StructField("province", StringType, true),
+      StructField("city", StringType, true),
+      StructField("gid", StringType, true)
+    ))
+    import spark.sql
+    //创建dateFrame 并创建临时视图
+    spark.createDataFrame(rowRdd, schema).createOrReplaceTempView("province_city_gid_view")
+
+    sql("select province,city,gid,count(gid)cart_count  from province_city_gid_view group by province,city,gid")
+      .createOrReplaceTempView("province_city_gid_cart_count_view")
+
+    //注册临时函数
+    spark.udf.register("city_concat_func", new CityConcatUDAF)
+
+    //自定义的函数 和 开窗函数 进行 聚合 组内排序
+
+    val areaTop3ProductArray = ArrayBuffer[AreaTop3Product]()
+    sql(
+      """
+        |select province,gid,cart_count,cities
+        |from(
+        |   select row_number()over( partition by  province order by cart_count desc) rank,province,gid,cart_count,cities
+        |   from(
+        |        select province,gid,sum(cart_count) cart_count ,city_concat_func(city) cities
+        |        from  province_city_gid_cart_count_view
+        |        group by   province,gid
+        |   )temp
+        |)tmp
+        |where tmp.rank<=3
+      """.stripMargin)
+      .collect() //将计算结果拉回Driver 端
+      .foreach(row => { //这是scala的api 不是spark的算子
+      val areaTop3Product = new AreaTop3Product(
+        taskID,
+        row.getAs[String]("province"),
+        row.getAs[String]("gid"),
+        row.getAs[Long]("cart_count"), //在sql中使用 sum 结果变为 Long 类型
+        row.getAs[String]("cities")
+      )
+      areaTop3ProductArray.append(areaTop3Product)
+    })
+
+    //将数据 存入到mysql中
+    AreaTop3ProductDao.deleteByTaskId(taskID)
+    AreaTop3ProductDao.insert(areaTop3ProductArray.toArray)
+
 
   }
 
@@ -461,7 +541,7 @@ object SessionStatTask extends BaseTask {
     //3,从hbase中读取符合任务参数的session访问记录
     val tuple11RDD = loadDataFromHbase()
     //4,调用spark各类算子，进行session的访问时长和补偿的分析性统计，最终将结果保存到mysql中
-    //        sessionVisitTimeAndStepLengthStat(tuple11RDD)
+    //    sessionVisitTimeAndStepLengthStat(tuple11RDD)
 
 
     //统计每天的新增用户数
@@ -475,8 +555,11 @@ object SessionStatTask extends BaseTask {
 
 
     //在符合条件的session中，获取点击、加入购物车，下单，支付数量排名前5的品类
-    calculateCategoryTop5(tuple11RDD)
+    //    calculateCategoryTop5(tuple11RDD)
 
+
+    //统计每个省份加入购物车排名前三的商品
+    addCartTop3GoodsStat(tuple11RDD)
 
     sc.stop()
   }

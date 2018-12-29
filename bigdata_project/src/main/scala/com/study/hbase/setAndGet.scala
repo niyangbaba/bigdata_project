@@ -6,8 +6,11 @@ import scala.util.control.Breaks._
   */
 object setAndGet {
   def main(args: Array[String]): Unit = {
-    println(setFieldValue("session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0","session_count","9"))
+//    println(setFieldValue("session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0","session_count","9"))
+
+
   }
+
 
   /**
     * session_count=4|1s_3s=1|4s_6s=1|7s_9s=0|10s_30s=0|30s_60s=0|1m_3m=0
