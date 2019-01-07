@@ -1,6 +1,7 @@
 package com.dxh.task
 
 import com.dxh.bean.Top5Category
+import com.dxh.kafka.KafkaManage
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
@@ -16,14 +17,13 @@ trait BaseTask {
     */
 
   val sparkConf = new SparkConf().setAppName(this.getClass.getSimpleName)
-    .setMaster("local[2]")
+    .setMaster("local[*]")
   //    .setMaster("spark://h21:7077")
 
   //设置kryo序列化 需要进行类的注册
   sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
   //注册
-  sparkConf.registerKryoClasses(Array(classOf[Top5Category]))
-
+  sparkConf.registerKryoClasses(Array(classOf[Top5Category],classOf[KafkaManage]))
 
   //调整sparksql在shuffle阶段的并行度
   sparkConf.set("spark.sql.shuffle.partitions", "2")

@@ -1,9 +1,11 @@
 package com.dxh.utils
 
 import java.text.SimpleDateFormat
-import java.util.Date
+import java.util.{Calendar, Date}
 import java.util.regex.Pattern
 import java.math.{BigDecimal, RoundingMode}
+
+import com.dxh.enum.DateTypeEnum
 
 import scala.util.control.Breaks._
 
@@ -162,6 +164,38 @@ object Utils {
   def getScale(doubleValue: Double, scale: Int) = {
     val bigDecimal = new BigDecimal(doubleValue) //需要手动导入  import java.math.BigDecimal
     bigDecimal.setScale(scale, RoundingMode.HALF_UP).doubleValue()
+  }
+
+
+  /**
+    *
+    */
+  def getDateInfo(longTime: Long, dateType: DateTypeEnum.Value) = {
+
+    val calendar = Calendar.getInstance()
+    calendar.setTimeInMillis(longTime)
+
+
+    if (dateType.equals(DateTypeEnum.year)) {
+      calendar.get(Calendar.YEAR)
+    } else if (dateType.equals(DateTypeEnum.season)) {
+      val month = calendar.get(Calendar.MONTH) + 1
+
+      if (month % 3 == 0) {
+        month / 3
+      } else {
+        month / 3 + 1
+      }
+
+    } else if (dateType.equals(DateTypeEnum.month)) {
+      calendar.get(Calendar.MONDAY) + 1
+    } else if (dateType.equals(DateTypeEnum.week)) {
+      calendar.get(Calendar.WEEK_OF_YEAR)
+    } else {
+      calendar.get(Calendar.DAY_OF_MONTH)
+    }
+
+
   }
 
 }

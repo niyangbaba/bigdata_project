@@ -35,7 +35,7 @@ object AnalsysisLogTask extends BaseTask {
   def main(args: Array[String]): Unit = {
 
     //添加项目使用jar包
-    sc.addJar("F:\\SpaceWork\\LearnProject\\bigdata_project\\target\\bigdata_project-1.0-SNAPSHOT.jar")
+//    sc.addJar("F:\\SpaceWork\\LearnProject\\bigdata_project\\target\\bigdata_project-1.0-SNAPSHOT.jar")
     //1.验证参数是否正确7
     validateInputArgs(args)
     //2.验证当前日期是否存在对应的日志(验证路径是否存在)  HDFS的路径是否存在

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<configuration>
+
+    <property>
+        <name>checkpoint.path</name>
+        <value>/checkpoint/1712</value>
+    </property>
+
+
+    <property>
+        <name>batch.interval</name>
+        <value>5</value>
+    </property>
+
+
+    <property>
+        <name>metadata.broker.list</name>
+        <value>h21:9092,h22:9092,h23:9092</value>
+    </property>
+
+    <property>
+        <name>group.id</name>
+        <value>NiKou</value>
+    </property>
+
+    <property>
+        <name>auto.offset.reset</name>
+        <value>largest</value>
+    </property>
+
+
+    <property>
+        <name>topics</name>
+        <value>event_log</value>
+    </property>
+</configuration>

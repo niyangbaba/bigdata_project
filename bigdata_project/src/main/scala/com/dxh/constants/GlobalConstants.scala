@@ -6,6 +6,8 @@ package com.dxh.constants
 object GlobalConstants {
 
   val DEFAULT_VALUE = "unknown"
+  val VALUE_OF_ALL = "all"
+
 
   val PROJECT_RESOURCE = "project_resource"
 
